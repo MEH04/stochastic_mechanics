@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-
+# hello 
 
 def discrete_random_walk(N, steps, drift=0):
     """Simulate N particles undergoing a random walk with given drift.
