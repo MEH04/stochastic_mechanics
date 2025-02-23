@@ -195,7 +195,7 @@ class Simulation:
             ax.set_title(f"Momentum Distribution at t = {time_grid[frame]:.3f}")
             ax.set_xlim(-10, 10)
             ax.set_ylim(0,0.7)
-        ax.legend()
+            ax.legend()
     
         ani = animation.FuncAnimation(fig, update, frames=range(1, time_steps, frame_step), interval=interval)
         plt.show()
