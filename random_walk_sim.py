@@ -1,39 +1,51 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-# live love laugh
+
 class Simulation: 
-
+    """Simulation wrapper, including animations and plotting."""
     def __init__(self, num_particles, steps, dt, k=1.0): 
-
+        """
+        Initialise simulation. 
+        
+        Parameters:
+            int num_particles: Number of particles to simulate.
+            int steps: Number of time steps.
+            float dt: Time step size.
+            float k: Wave number.
+        """
         self.stochastic = StochasticMechanics(k) # stochastic mechanics object
         self.quantum = QuantumMechanics(k) # quantum mechanics object
         self.num_particles = num_particles
         self.steps = steps
         self.dt = dt
         self.dx = np.sqrt(self.dt)  # Step size from requirement dx^2/dt = 1
+        self.k = k
+        self.time_grid = np.arange(1E-10, dt * steps, dt)
     
-    def simulate_free_particle(self, k, initial_positions = 'gaussian', plotting = None, print_time = None):
+    def simulate_free_particle(self, x_max = 10, p_max = 10, initial_positions = 'gaussian', plotting = False, print_time = None):
         """
-        Dear Paul, 
-        I am i third year BSc project student, halfway through my term 2 project with Dimitri Vvendesky. 
-        I have been having some issues with my project partner Matthew Howarth and would like to do the project alone.
-        Please let me know if this is possible, or if i have to live a docstring-less life. 
-        Best Wishes, 
-        Ria Ranjitkar 
-        """
+        Simulate a free particle including position and momentum measures. 
 
-        walk = RandomWalk(self.num_particles, self.steps, self.dt, initial_positions=initial_positions)
-        stochastic = StochasticMechanics(k) # stochastic mechanics object
-        quantum = QuantumMechanics(k) # quantum mechanics object
+        Parameters:
+            float x_max: Mod of maximum position value for the simulation.
+            float p_max: Mod of maximum momentum value for the simulation.
+            str initial_positions: Initial position distribution. Options are 'delta' and 'gaussian'.
+            bool plotting: Whether to plot the simulation.
+            float print_time: Time to print the mean and standard deviation of position and momentum.
+        """
+        x_grid = np.arange(-x_max, x_max, self.dx) # grid to perform random walk on; to initialise initial distribution
+        walk = RandomWalk(x_grid, self.num_particles, self.steps, self.dt, initial_positions=initial_positions)
+        stochastic = StochasticMechanics(self.k) # stochastic mechanics object
+        quantum = QuantumMechanics(self.k) # quantum mechanics object
         time_grid, positions = walk.wiener_process(stochastic.free_particle_drift) # update 
-        x_grid = np.linspace(np.min(positions), np.max(positions), 1000)
-        psi_squared = quantum.free_particle_psi_squared(x_grid, time_grid) # psi(x,t)
+        x_grid = np.linspace(np.min(positions), np.max(positions), 1000) # new grid for computing psi_squared
+        p_grid = np.linspace(-p_max, p_max, len(x_grid))
+        psi_squared = quantum.free_particle_psi_squared(x_grid, time_grid) # find wave functions for plotting purposes
         momenta = positions / time_grid
-        p_grid = np.linspace(-10,10,1000)
         psi_squared_momentum = quantum.free_particle_momentum_psi_squared(p_grid, time_grid)
 
-        if print_time is not None:
+        if print_time:
             idx = np.argmin(np.abs(time_grid - print_time))
             mean_position = np.mean(positions[:, idx])
             mean_momentum = np.mean(momenta[:, idx])
@@ -44,18 +56,40 @@ class Simulation:
         if plotting: 
             self.plot_trajectories(time_grid, positions, 5)
             self.plot_std(time_grid, positions, psi_squared)
-            self.animate_position_momentum(time_grid, positions, psi_squared, psi_squared_momentum)
+            self.animate_position_momentum(x_grid, time_grid, positions, psi_squared, psi_squared_momentum)
+    
+    def simulate_tunneling(self, x_max, starting_pos, sigma, speed, V_frac, V_size, initial_positions = 'gaussian', plotting = False):
+        """
+        Simulate tunneling of a particle in a potential well using the Crank-Nicolson method.
 
-            
+        Parameters:
+            float x_max: Maximum position value for the simulation.
+            float starting_pos: Starting position of the wave packet
+            float sigma: Standard deviation of the initial wave function.
+            float speed: Speed of the wave packet.
+            float V_frac: Fraction of the grid to apply the potential energy to.
+            float V_size: Potential energy size.
+            str initial_positions: Initial position distribution. Options are 'delta' and 'gaussian'.
+            bool plotting: Whether to plot the simulation.
+        """
+        # change self.dx to 1000 or something if too slow.
+        quantum = QuantumMechanics(self.k)
+        x_grid = np.arange(-x_max, x_max, self.dx) # grid to perform random walk on; to initialise initial distribution
+        V_x = quantum.create_potential(x_grid, V_size, V_frac)
+        psi_zero = (1/np.sqrt(2*np.pi*sigma))*np.exp(-(x_grid-starting_pos)**2/(2*sigma**2))*np.exp(speed*1j*x_grid)
+        psi_xt = quantum.evolve_psi_tunneling(self.steps, x_grid, V_x, psi_zero)
+        stochastic = StochasticMechanics(self.time_grid, x_grid, psi_xt, self.k)
+        walk = RandomWalk(x_grid, self.num_particles, self.steps, self.dt, mean = starting_pos, sigma=sigma, initial_positions=initial_positions)
+        time_grid, positions = walk.wiener_process(stochastic.numerical_bf)
+        if plotting:
+            self.animate_position(x_grid, time_grid, positions, np.abs(psi_xt)**2)
 
-    # def simulate_tunneling  # simulation number 2 to be implemented.
-   
-
-    def animate_position_momentum(self, time_grid, positions, psi_squared, psi_squared_momentum, num_bins=30, frame_step=10, interval=50):  
+    def animate_position_momentum(self, x_grid, time_grid, positions, psi_squared, psi_squared_momentum, num_bins=30, frame_step=10, interval=50):  
         """
         Animate the position and momentum distribytions over time in a side-by-side subplot.
 
         Parameters:
+            x_grid: Position grid on which psi was calculated.
             time_grid: Array of time values.
             positions: Array of particle positions over time.
             psi_squared: Array of |ψ(x,t)|² values over time.
@@ -77,7 +111,6 @@ class Simulation:
 
         # Define x and momentum grid values
         x_min, x_max = np.min(positions), np.max(positions)
-        x_values = np.linspace(x_min, x_max, 1000)
         p_griddie = np.linspace(-10, 10, 1000)
         analytical_var_product_list = []
         lower_bound_list = []
@@ -98,7 +131,7 @@ class Simulation:
                                                 alpha=0.7, color='blue', edgecolor='black', label="Particle Distribution")
             psi_values = psi_squared[:, frame]
             y_min, y_max = np.min(psi_values), np.max(psi_values)
-            axs[0].plot(x_values, psi_values, color='red', linestyle='dashed', linewidth=2, label=r"$|\psi(x,t)|^2$")
+            axs[0].plot(x_grid, psi_values, color='red', linestyle='dashed', linewidth=2, label=r"$|\psi(x,t)|^2$")
             axs[0].set_xlim(x_min, x_max)
             axs[0].set_ylim(y_min, y_max*1.1)
             axs[0].set_title(f"Position Distribution at t = {time_grid[frame]:.3f}")
@@ -155,11 +188,15 @@ class Simulation:
         plt.xlabel('Time')
         plt.show()
 
-    def animate_simulation(self, time_grid, positions, psi_squared, num_bins=30, frame_step = 10, interval=50):  
+    def animate_position(self, x_grid, time_grid, positions, psi_squared, num_bins=30, frame_step = 10, interval=50):  
         """
         Animate the distribution of particle positions over time.
 
         Parameters:
+            array x_grid: Position grid.
+            array time_grid: Array of time values.
+            array positions: Array of particle positions over time.
+            array psi_squared: Array of |ψ(x,t)|² values over time.
             int num_bins: Number of bins for the histogram.
             int frame_step: Time interval between frames.
             int interval: Animation speed (in milliseconds).
@@ -168,10 +205,7 @@ class Simulation:
         
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.set_xlabel("Position", fontsize=16)
-        ax.set_ylabel("Probability Density", fontsize=16) 
-        x_min = np.min(positions)
-        x_max = np.max(positions)
-        x_values = np.linspace(x_min, x_max, 1000)
+        ax.set_ylabel("Probability Density", fontsize=16)
         # Function to update the animation frame
         def update(frame):
             ax.clear()  # Clear previous frame
@@ -182,73 +216,14 @@ class Simulation:
             x_min = np.min(positions_at_time)
             x_max = np.max(positions_at_time)
             psi_values = psi_squared[:, frame]
-            ax.plot(x_values, psi_values, color='red', linestyle='dashed', linewidth=2, label=r"$|\psi(x,t)|^2$")
+            ax.plot(x_grid, psi_values, color='red', linestyle='dashed', linewidth=2, label=r"$|\psi(x,t)|^2$")
             ax.set_xlabel("Position")
             ax.set_ylabel("Probability Density")
             ax.set_xlim(x_min, x_max)
             ax.set_ylim(0, 1)
             ax.set_title(f"Particle Position Distribution at t = {time_grid[frame]:.3f}")
             ax.legend()
-
-       
-        ani = animation.FuncAnimation(fig, update, frames=range(0, time_steps, frame_step), interval=interval)
-
-    
-        plt.show()
-
-    
-    def animate_momentum(self, time_grid, positions, psi_sqaured_momentum, num_bins=30, frame_step=10, interval=50):  
-        """
-        Animate the instantaneous momentum distribution over time.
-        Here, we compute momentum as q(t)/t for t>0.
-        """
-        time_steps = self.steps
-        
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.set_xlabel("Momentum", fontsize=16)
-        ax.set_ylabel("Probability Density", fontsize=16)
-        
-        def update(frame):
-            # Skip the first frame to avoid division by zero.
-
-        
-            if time_grid[frame] == 0:
-                return
-            ax.clear()
-    
-            # Compute instantaneous momentum at time t (for each particle)
-            current_momenta = positions[:, frame] / time_grid[frame]
-            current_positions = positions[:, frame]
-            mean_x = np.mean(current_positions)
-            mean_p = np.mean(current_momenta)
-            sigma_x = np.std(current_positions)
-            sigma_p = np.std(current_momenta)
-            covariance = np.mean((current_positions - mean_x) * (current_momenta - mean_p))
-
-            variance_product = sigma_x**2 * sigma_p**2
-            lower_bound = 0.25 + covariance**2
-
-            textstr = (
-                r"$\left(\Delta x\right)^2 \left(\Delta p\right)^2 = $" + f"{variance_product:.2f}\n"
-                r"$\mathrm{Cov}(x,p)^2 + \frac{1}{4} = $" + f"{lower_bound:.2f}"
-            )
-
-            hist_data, bin_edges, _ = ax.hist(current_momenta, bins=num_bins, density=True, 
-                                              alpha=0.7, color='green', label="Simulated Momentum")
-            
-            p_griddie = np.linspace(-10, 10, 1000)
-            #psi_frame = psi_sqaured_momentum[:, frame]
-            ax.plot(p_griddie, psi_sqaured_momentum, 'r--', linewidth=2, label=r'$|\psi(p,t)|^2$')
-            ax.set_xlabel("Momentum")
-            ax.set_ylabel("Probability Density")
-            ax.set_title(f"Momentum Distribution at t = {time_grid[frame]:.3f}")
-            ax.set_xlim(-10, 10)
-            ax.set_ylim(0,0.7)
-            props = dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor="lightgray", alpha=0.7)
-            ax.text(0.05, 0.95, textstr, transform=plt.gca().transAxes,fontsize=10, verticalalignment='top', bbox=props)
-            ax.legend()
-    
-        ani = animation.FuncAnimation(fig, update, frames=range(1, time_steps, frame_step), interval=interval)
+        ani = animation.FuncAnimation(fig, update, frames=range(0, time_steps, frame_step), interval=10)
         plt.show()
     
     def plot_momentum_distribution(self, momenta, num_bins=50):
@@ -264,7 +239,6 @@ class Simulation:
         plt.title("Final Momentum Distribution")
         plt.show()
 
-    
     def plot_trajectories(self, time_grid, positions, number): 
         """
         Plot trajectories of randomly selected particles over time.
@@ -278,26 +252,6 @@ class Simulation:
             plt.xlabel('$t$', fontsize=16)
             plt.ylabel('$x$', fontsize=16)
         plt.show()
-    
-    def plot_momentum_distribution(self, time_grid, momenta, time_index, num_bins=50):
-        """
-        Plot the distribution of particle momenta at a specific time step.
-
-        Parameters:
-            int time_index: Index of the time step to plot.
-            int num_bins: Number of bins for the histogram.
-        """
-        if time_index >= self.steps:
-            raise ValueError('Invalid time index.')
-        momenta_at_time = momenta[:, time_index]
-        hist, bin_edges = np.histogram(momenta_at_time, bins=num_bins, density=True)
-        plt.figure(figsize=(8, 5))
-        plt.bar(bin_edges[:-1], hist, width=np.diff(bin_edges), alpha=0.7,color='black')
-        plt.xlabel("Momentum", fontsize=16)
-        plt.ylabel("Probability Density",   fontsize=16)
-        plt.title(f"Particle Momentum Distribution at t = {time_grid[time_index]:.3f}")
-        plt.show()
-    
 
     def plot_distribution(self, time_grid, positions, time_index, num_bins=50):
         """
@@ -335,12 +289,14 @@ class Simulation:
         plt.show()
 
 class QuantumMechanics:
-    def __init__(self, k=1.0):
+    def __init__(self, dt = None, k=1.0):
         """
         Parameters:
+            float dt: Time step size
             float k: Wave number
         """
         self.k = k
+        self.dt = dt
 
     def free_particle_psi_squared(self, x, t):
         """
@@ -388,16 +344,123 @@ class QuantumMechanics:
         p = np.asarray(p)[:, np.newaxis]
     
         return  1/np.sqrt(np.pi) * np.exp(-1 * (p - self.k)**2) 
+    
+    @staticmethod
+    def create_potential(x_grid, V_size, V_frac): 
+        """
+        Create a potential energy grid for a potential well.
+
+        Parameters:
+            array x_grid: Position grid.
+            float V_size: Potential energy size.
+            float V_frac: Fraction of the grid to apply the potential energy to.
+
+        Returns:
+            array: Potential energy grid.
+        """
+        V_x = np.zeros(len(x_grid)).astype(complex)
+        V_x[int(len(x_grid)*(0.5-V_frac/2)):int(len(x_grid)*(0.5+V_frac/2))] = V_size
+        return V_x
+    
+    @staticmethod
+    def construct_tridiagonal_matrix(a, b, c):
+        """
+        Constructs a tridiagonal matrix A from subdiagonal (a), main diagonal (b), and superdiagonal (c).
+        
+        Args:
+            array a Subdiagonal (n-1 elements, a[0] is unused)
+            array b Main diagonal (n elements)
+            array c Superdiagonal (n-1 elements, c[-1] is unused)
+        
+        Returns:
+            Tridiagonal matrix A of shape (n, n)
+        """
+        n = len(b)
+        A = np.zeros((n, n), dtype=complex)
+
+        # Fill diagonals
+        np.fill_diagonal(A, b)  # Main diagonal
+        np.fill_diagonal(A[1:], a[1:])  # Subdiagonal
+        np.fill_diagonal(A[:, 1:], c[:-1])  # Superdiagonal
+        
+        return A
+
+    @staticmethod
+    def thomas_algorithm(a, b, c, d):
+        """
+        Solves Ax = d for a tridiagonal matrix A using the Thomas algorithm O(n).
+        
+        Args:
+            array a Subdiagonal (n-1 elements, a[0] is unused)
+            array b Main diagonal (n elements)
+            array c Superdiagonal (n-1 elements, c[-1] is unused)
+            array d Right-hand side vector (n elements)
+        
+        Returns: 
+            Solution vector x (n elements)
+        """
+        n = len(b)
+        x = np.zeros(n, dtype=complex)
+        # forwards sub
+        c_prime = np.zeros(n-1, dtype=complex)
+        d_prime = np.zeros(n, dtype=complex)
+        c_prime[0] = c[0]/b[0]
+        d_prime[0] = d[0]/b[0]
+        for i in range(1,n):
+            d_prime[i] = (d[i]-a[i]*d_prime[i-1])/(b[i]-a[i]*c_prime[i-1])
+            if i < n-1:
+                c_prime[i] = c[i]/(b[i]-a[i]*c_prime[i-1])
+        # backwards sub
+        x[-1] = d_prime[-1]
+        for i in range(n-2,-1,-1):
+            x[i] = d_prime[i] - c_prime[i]*x[i+1]
+        return x
+
+    def evolve_psi_tunneling(self, steps, x_grid, V_x, psi_0): 
+        """
+        Simulates tunneling of a particle in a potential well using the Crank-Nicolson method.
+        
+        Args:
+            int steps Number of time steps
+            array x_grid Position grid (n elements)
+            array V_x Potential energy grid (n elements)
+            array psi_0 Initial wave function (n elements)
+        
+        Returns:
+            Wave function at the final time step (n elements)
+        """
+        n = len(x_grid)
+        psi_xt = np.zeros((len(x_grid),steps), dtype=complex)
+        psi_xt[:,0] = psi_0
+        alpha = 1j
+        A_a = -alpha*np.ones(n)
+        A_b = 2+2*alpha+1j*self.dt*V_x
+        A_c = -alpha*np.ones(n)
+        B_a = -A_a
+        B_b = 2-2*alpha-1j*dt*V_x
+        B_c = -A_c
+        B = self.construct_tridiagonal_matrix(B_a,B_b,B_c)
+        for i in range(1,steps):
+            psi_xt[:,i] = self.thomas_algorithm(A_a,A_b,A_c,np.dot(B,psi_xt[:,i-1]))
+            psi_xt[0], psi_xt[-1] = 0, 0
+            integral = np.trapz(np.abs(psi_xt[:,i])**2, x_grid)
+            psi_xt[:,i] = psi_xt[:,i]/np.sqrt(integral)
+        return psi_xt
+
 
 class StochasticMechanics:
-    def __init__(self, k=1.0, psi_xt = None):
+    def __init__(self, time_grid = None, x_grid = None, psi_xt = None, k=1.0):
         """
         Parameters:
-            float k: Wave number
+            array time_grid: Time grid
+            array x_grid: Position grid
             array psi_xt: Wave function array in the spatiotemporal grid
+            float k: Wave number
         """
-        self.k=k
+        self.time_grid = time_grid
+        self.x_grid = x_grid
         self.psi_xt = psi_xt # note the free particle does not need this
+        self.k=k
     
     def free_particle_drift(self,x,t):
         """
@@ -411,26 +474,55 @@ class StochasticMechanics:
             float: Drift velocity
         """
         return self.k + (t-1)*(x-self.k*t)/(1+t**2)
+    
+    def numerical_bf(self, x, t):
+        """
+        Determine b_f by numerical derivative of psi_xt. 
+
+        Parameters:
+            float x: Position
+            float t: Time
+        """
+        nearest_x_index = np.argmin(np.abs(self.x_grid - x))
+        nearest_t_index = np.argmin(np.abs(self.time_grid - t))
+        if nearest_x_index == 0 or nearest_x_index == len(self.x_grid) - 1:
+            b_f = 0
+        else:
+            psi_x_minus_one = self.psi_xt[nearest_x_index-1, nearest_t_index]
+            psi = self.psi_xt[nearest_x_index, nearest_t_index]
+            psi_x_plus_one = self.psi_xt[nearest_x_index+1, nearest_t_index]
+            dx = self.x_grid[1] - self.x_grid[0]
+            nabla_psi = (psi_x_plus_one - psi_x_minus_one) / (2 * dx) # central difference method O(dx^2)
+            b_f = np.real(nabla_psi / psi) + np.imag(nabla_psi / psi)
+        return b_f
+
 
 class RandomWalk:
-    def __init__(self, num_particles, steps, dt, k=1.0, initial_positions='delta'):
+    def __init__(self, x_grid, num_particles, steps, dt, mean = 0, sigma = 1/np.sqrt(2), k=1.0, initial_positions='delta'):
         """
         Parameters:
+            array x_grid: Position grid.
             int num_particles: Number of particles to simulate.
             float steps: Number of time steps.
             float dt: time grid resolution; dx follows.
             float k: wave number
             str initial_positions: Initial position distribution. Options are 'delta' and 'gaussian'.
         """
+        self.x_grid = x_grid
         self.num_particles = num_particles
         self.dt = dt
         self.steps = steps
         self.dx = np.sqrt(self.dt)  # Step size from requirement dx^2/dt = 1
-        self.time_grid = np.arange(0.00000000001, dt * steps, dt)
+        self.time_grid = np.arange(1E-10, dt * steps, dt)
         if initial_positions == 'delta':
             self.positions = np.zeros((num_particles, steps))
         elif initial_positions == 'gaussian':
-            self.positions = np.random.normal(scale = 1/np.sqrt(2), size=(num_particles, steps))
+            # want to confine the particles to the x_grid. 
+            sampled_positions = np.random.normal(loc=mean, scale=sigma, size=num_particles)
+            # Map to the closest values in the x_grid
+            self.positions = np.array([x_grid[np.argmin(np.abs(x_grid - pos))] for pos in sampled_positions])
+            # Expand positions to store for all time steps
+            self.positions = np.tile(self.positions[:, np.newaxis], steps)
 
     def wiener_process(self, drift_velocity):
         """
@@ -446,8 +538,9 @@ class RandomWalk:
             t = self.time_grid[i]
             # Compute drift velocity for each particle
             prob_drift = np.array([drift_velocity(x, t) for x in self.positions[:, i - 1]]) * (self.dt / self.dx)
+            prob_drift = np.clip(prob_drift, -1, 1)
             # Ensure consistency condition holds for all particles
-            if np.any(np.abs(prob_drift) >= 1):
+            if np.any(np.abs(prob_drift) > 1):
                 raise ValueError('Consistency condition not met for at least one particle.')
             p_left = 0.5 * (1 - prob_drift)  # Compute left probability per particle
             deviate = np.random.uniform(0, 1, num_particles)  
@@ -457,10 +550,17 @@ class RandomWalk:
         return self.time_grid, self.positions
 
 
-num_steps = 10000
+num_steps = 3000
 dt = 0.01
-num_particles = 10000
+num_particles = 2000
+x_max = 10
+sigma = 0.3
+starting_point = -2
+speed = 1
+V_size = 1
+V_frac = 0.1
 
 simulation = Simulation(num_particles, num_steps, dt)
-simulation.simulate_free_particle(1.0, plotting = True, print_time = 1000)
+simulation.simulate_tunneling(x_max, starting_pos = starting_point, sigma = sigma, speed = speed, V_frac = V_frac, V_size = V_size, plotting = True)
+# simulation.simulate_free_particle(x_max = 1, initial_positions='gaussian', plotting = True)
 
